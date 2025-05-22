@@ -8,10 +8,9 @@ logger = logging.getLogger(__name__)
 
 def ignore_out_of_bounds_classes_wrapper(func):
     """
-    For a model that outputs 'n_pred_classes' classes, this wrapper removes entries in the
-    true/pred pairs for which the true label is not in the range [0, 1, ..., n_pred_classes - 1].
-    'n_pred_classes' is determined as the length of the prediction tensor on the last dimension.
+    Wraps a loss or metric function to ignore target classes outside the range [0, n_pred_classes - 1].
     """
+
     @wraps(func)
     @tf.function
     def wrapper(true, pred, **kwargs):
@@ -19,20 +18,26 @@ def ignore_out_of_bounds_classes_wrapper(func):
         n_pred_classes = pred.get_shape()[-1]
         true = tf.reshape(true, [-1])
         pred = tf.reshape(pred, [-1, n_pred_classes])
-        mask = tf.where(tf.logical_and(
-                            tf.greater_equal(true, 0),
-                            tf.less(true, n_pred_classes)
-                        ),
-                        tf.ones_like(true),
-                        tf.zeros_like(true))
+        mask = tf.where(
+            tf.logical_and(tf.greater_equal(true, 0), tf.less(true, n_pred_classes)),
+            tf.ones_like(true),
+            tf.zeros_like(true),
+        )
         mask = tf.cast(mask, tf.bool)
         true = tf.boolean_mask(true, mask, axis=0)
         pred = tf.boolean_mask(pred, mask, axis=0)
-        return func(true, pred, **kwargs)
-    logger.info(f"Wrapping loss/metric function '{func}' to ignore 'true' "
-                f"classes with integer values outside of the model prediction integer range "
-                f"(e.g., ignoring true class labels of value 5 or -1 if n_classes=5, "
-                f"i.e. when model outputs values in [0, 1, 2, 3, 4]).")
+
+        result = func(true, pred, **kwargs)
+
+        # Avoid returning operations to tf.function
+        if isinstance(result, tf.Operation) or result is None:
+            return None
+        return tf.identity(result)
+
+    logger.info(
+        f"Wrapping loss/metric function '{func}' to ignore 'true' "
+        f"classes with integer values outside of the model prediction integer range."
+    )
     return wrapper
 
 
@@ -51,8 +56,8 @@ def f1_scores_from_cm(cm):
     dices = np.zeros_like(precisions)
 
     # Compute dice
-    intrs = (2 * precisions * recalls)
-    union = (precisions + recalls)
+    intrs = 2 * precisions * recalls
+    union = precisions + recalls
     dice_mask = union > 0
     dices[dice_mask] = intrs[dice_mask] / union[dice_mask]
     return dices
@@ -76,8 +81,10 @@ def recall_scores_from_cm(cm):
 
 def concatenate_true_pred_pairs(pairs=None, trues=None, pred=None):
     if pairs is None and (trues is None or pred is None):
-        raise ValueError("Must specify either 'pairs' argument "
-                         "or both 'trues' and 'pred' arguments")
+        raise ValueError(
+            "Must specify either 'pairs' argument "
+            "or both 'trues' and 'pred' arguments"
+        )
     if pairs is not None:
         trues, pred = zip(*pairs)
     return np.concatenate(list(trues)), np.concatenate(list(pred))

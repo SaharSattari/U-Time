@@ -26,30 +26,37 @@ def get_free_gpus(max_allowed_mem_usage=400):
     # Check if allowed GPUs are set in CUDA_VIS_DEV.
     allowed_gpus = _get_system_wide_set_gpus()
     if allowed_gpus:
-        logger.info(f"[OBS] Considering only system-wise allowed GPUs: {allowed_gpus} (set in"
-                    f" CUDA_VISIBLE_DEVICES env variable).")
+        logger.info(
+            f"[OBS] Considering only system-wise allowed GPUs: {allowed_gpus} (set in"
+            f" CUDA_VISIBLE_DEVICES env variable)."
+        )
         return allowed_gpus
     # Else, check GPUs on the system and assume all non-used (mem. use less
     # than max_allowed_mem_usage) is fair game.
     try:
         # Get list of GPUs
         gpu_list = check_output(["nvidia-smi", "-L"], universal_newlines=True)
-        gpu_ids = np.array(re.findall(r"GPU[ ]+(\d+)", gpu_list), dtype=np.int)
+        gpu_ids = np.array(re.findall(r"GPU[ ]+(\d+)", gpu_list), dtype=int)
 
         # Query memory usage stats from nvidia-smi
-        output = check_output(["nvidia-smi", "-q", "-d", "MEMORY"], universal_newlines=True)
+        output = check_output(
+            ["nvidia-smi", "-q", "-d", "MEMORY"], universal_newlines=True
+        )
 
         # Fetch the memory usage of each GPU
-        mem_usage = re.findall(r"FB Memory Usage.*?Used[ ]+:[ ]+(\d+)",
-                               output, flags=re.DOTALL)
+        mem_usage = re.findall(
+            r"FB Memory Usage.*?Used[ ]+:[ ]+(\d+)", output, flags=re.DOTALL
+        )
         assert len(gpu_ids) == len(mem_usage)
 
         # Return all GPU ids for which the memory usage is below or eq. to max allowed
         free = list(map(lambda x: int(x) <= max_allowed_mem_usage or 0, mem_usage))
         return list(gpu_ids[free])
     except FileNotFoundError as e:
-        raise FileNotFoundError("[ERROR] nvidia-smi is not installed. "
-                                "Consider setting the --num_gpus=0 flag.") from e
+        raise FileNotFoundError(
+            "[ERROR] nvidia-smi is not installed. "
+            "Consider setting the --num_gpus=0 flag."
+        ) from e
 
 
 def _get_gpu_visibility_string(free_gpus: list, num_gpus=1):
@@ -60,9 +67,11 @@ def _get_gpu_visibility_string(free_gpus: list, num_gpus=1):
 def _get_free_gpus_visibility_string(num_gpus=1, max_allowed_mem_usage=400):
     free = get_free_gpus(max_allowed_mem_usage)
     if not free or num_gpus > len(free):
-        raise ResourceWarning(f"Requested N={num_gpus} GPUs, but only found {len(free)} GPUs available with memory "
-                              f"loads less than or equal to {max_allowed_mem_usage} MiB "
-                              f"('None' signals no memory requirement)")
+        raise ResourceWarning(
+            f"Requested N={num_gpus} GPUs, but only found {len(free)} GPUs available with memory "
+            f"loads less than or equal to {max_allowed_mem_usage} MiB "
+            f"('None' signals no memory requirement)"
+        )
     return _get_gpu_visibility_string(free, num_gpus=num_gpus)
 
 
@@ -80,21 +89,29 @@ def set_gpu(gpu_visibility_string: str):
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu_visibility_string
 
 
-def await_and_set_free_gpu(num_gpus=1, sleep_seconds=60, max_allowed_mem_usage=400, timeout_seconds=3600):
+def await_and_set_free_gpu(
+    num_gpus=1, sleep_seconds=60, max_allowed_mem_usage=400, timeout_seconds=3600
+):
     gpu_vis_string = ""
     wait_seconds = 0
     if num_gpus > 0:
         logger.info(f"Waiting for free N={num_gpus} GPU(s)...")
         while not gpu_vis_string:
             if wait_seconds >= timeout_seconds:
-                raise OSError(f"Could not find {num_gpus} with max allowed memory usage "
-                              f"of {max_allowed_mem_usage} MiB within timeout of {timeout_seconds} seconds.")
+                raise OSError(
+                    f"Could not find {num_gpus} with max allowed memory usage "
+                    f"of {max_allowed_mem_usage} MiB within timeout of {timeout_seconds} seconds."
+                )
             try:
-                gpu_vis_string = _get_free_gpus_visibility_string(num_gpus, max_allowed_mem_usage)
+                gpu_vis_string = _get_free_gpus_visibility_string(
+                    num_gpus, max_allowed_mem_usage
+                )
             except ResourceWarning as e:
                 logger.warning(f"Not enough available GPUs. Original warning: {str(e)}")
-                logger.warning(f"No available GPUs... Sleeping {sleep_seconds}s "
-                               f"(current wait time is {wait_seconds}s. Timeout is {timeout_seconds}s).")
+                logger.warning(
+                    f"No available GPUs... Sleeping {sleep_seconds}s "
+                    f"(current wait time is {wait_seconds}s. Timeout is {timeout_seconds}s)."
+                )
                 sleep(sleep_seconds)
                 wait_seconds += sleep_seconds
     set_gpu(gpu_vis_string)
